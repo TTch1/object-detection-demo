@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediaPipe Object Detection</title>
+
+  <!-- Material Design CSS -->
+  <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+
+  <style>
+    body {
+      font-family: Roboto, Arial, sans-serif;
+      margin: 2em;
+      color: #3d3d3d;
+    }
+
+    h1 {
+      color: #007f8b;
+    }
+
+    .videoView,
+    .detectOnClick {
+      position: relative;
+      float: left;
+      width: 48%;
+      margin: 2% 1%;
+      cursor: pointer;
+    }
+
+    .detectOnClick img {
+      width: 100%;
+    }
+
+    video {
+      display: block;
+      transform: rotateY(180deg);
+    }
+
+    .highlighter {
+      background: rgba(0, 255, 0, 0.25);
+      border: 1px dashed #fff;
+      position: absolute;
+    }
+
+    .info {
+      position: absolute;
+      background-color: #007f8b;
+      color: #fff;
+      padding: 5px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Multiple Object Detection using MediaPipe</h1>
+
+  <section id="demos" class="invisible">
+    <h2>Demo: Detecting Images</h2>
+    <p><b>Click on an image below</b> to detect objects in the image.</p>
+
+    <div class="detectOnClick">
+      <img src="https://assets.codepen.io/9177687/coupledog.jpeg" title="Click to detect objects!">
+    </div>
+    <div class="detectOnClick">
+      <img src="https://assets.codepen.io/9177687/doggo.jpeg" title="Click to detect objects!">
+    </div>
+
+    <h2>Demo: Webcam Continuous Detection</h2>
+    <p>Click "Enable Webcam" to detect objects in real-time.</p>
+    <div id="liveView" class="videoView">
+      <button id="webcamButton" class="mdc-button mdc-button--raised">
+        <span class="mdc-button__label">ENABLE WEBCAM</span>
+      </button>
+      <video id="webcam" autoplay playsinline></video>
+    </div>
+  </section>
+
+  <script type="module">
+    import {
+      ObjectDetector,
+      FilesetResolver
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.2";
+
+    const demosSection = document.getElementById("demos");
+    let objectDetector;
+    let runningMode = "IMAGE";
+
+    async function initializeObjectDetector() {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.2/wasm"
+      );
+      objectDetector = await ObjectDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+          delegate: "GPU"
+        },
+        scoreThreshold: 0.5,
+        runningMode: runningMode
+      });
+      demosSection.classList.remove("invisible");
+    }
+    initializeObjectDetector();
+
+    const imageContainers = document.getElementsByClassName("detectOnClick");
+    for (let imageContainer of imageContainers) {
+      imageContainer.children[0].addEventListener("click", async (event) => {
+        const target = event.target;
+        const ratio = target.height / target.naturalHeight;
+
+        if (!objectDetector) {
+          alert("Object Detector is still loading. Please try again.");
+          return;
+        }
+
+        if (runningMode === "VIDEO") {
+          runningMode = "IMAGE";
+          await objectDetector.setOptions({ runningMode: "IMAGE" });
+        }
+
+        const detections = await objectDetector.detect(target);
+        displayDetections(detections, target, ratio);
+      });
+    }
+
+    function displayDetections(result, element, ratio) {
+      const highlighters = element.parentNode.querySelectorAll(".highlighter");
+      highlighters.forEach(highlighter => highlighter.remove());
+
+      result.detections.forEach(detection => {
+        const highlighter = document.createElement("div");
+        highlighter.className = "highlighter";
+        highlighter.style.left = `${detection.boundingBox.originX * ratio}px`;
+        highlighter.style.top = `${detection.boundingBox.originY * ratio}px`;
+        highlighter.style.width = `${detection.boundingBox.width * ratio}px`;
+        highlighter.style.height = `${detection.boundingBox.height * ratio}px`;
+        element.parentNode.appendChild(highlighter);
+      });
+    }
+
+    const webcamButton = document.getElementById("webcamButton");
+    const video = document.getElementById("webcam");
+    webcamButton.addEventListener("click", async () => {
+      if (!objectDetector) {
+        alert("Object Detector is still loading. Please wait.");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      video.addEventListener("loadeddata", predictWebcam);
+    });
+
+    async function predictWebcam() {
+      if (runningMode === "IMAGE") {
+        runningMode = "VIDEO";
+        await objectDetector.setOptions({ runningMode: "VIDEO" });
+      }
+
+      const detections = await objectDetector.detectForVideo(video, performance.now());
+      displayDetections(detections, video, 1);
+      requestAnimationFrame(predictWebcam);
+    }
+  </script>
+</body>
+
+</html>
